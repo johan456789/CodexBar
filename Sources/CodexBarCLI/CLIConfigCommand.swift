@@ -146,6 +146,18 @@ extension CodexBarCLI {
         }
     }
 
+    /// Providers with an API source that ignore `ProviderConfig.apiKey` but read API keys from token accounts
+    /// injected into their fetch environment (for example DeepSeek); `set-api-key` stores the key as a new token
+    /// account for them. The API-source check excludes token accounts that hold OAuth or session credentials.
+    static func storesAPIKeyAsTokenAccount(_ provider: UsageProvider) -> Bool {
+        guard !ProviderConfigEnvironment.supportsAPIKeyOverride(for: provider),
+              ProviderDescriptorRegistry.descriptor(for: provider).fetchPlan.sourceModes.contains(.api),
+              let support = TokenAccountSupportCatalog.support(for: provider),
+              case .environment = support.injection
+        else { return false }
+        return true
+    }
+
     static func runConfigSetAPIKey(_ values: ParsedValues) {
         let output = CLIOutputPreferences.from(values: values)
 
@@ -158,7 +170,9 @@ extension CodexBarCLI {
                 output: output,
                 kind: .args)
         }
-        guard ProviderConfigEnvironment.supportsAPIKeyOverride(for: provider) else {
+        guard ProviderConfigEnvironment.supportsAPIKeyOverride(for: provider)
+            || Self.storesAPIKeyAsTokenAccount(provider)
+        else {
             Self.exit(
                 code: .failure,
                 message: Self.unsupportedAPIKeyErrorMessage(for: provider, rawProvider: rawProvider),
@@ -202,16 +216,23 @@ extension CodexBarCLI {
             Self.exit(code: .failure, message: error.localizedDescription, output: output, kind: .config)
         }
 
+        let providerConfig = config.providerConfig(for: provider.instanceID)
+        let storedAccount = accountOptions == nil ? nil : providerConfig?.tokenAccounts?.accounts.last
         let result = ConfigSetAPIKeyResult(
             provider: provider.rawValue,
-            enabled: config.providerConfig(for: provider.instanceID)?.enabled ?? false,
+            enabled: providerConfig?.enabled ?? false,
+            tokenAccount: storedAccount?.label,
             configPath: store.fileURL.path)
 
         switch output.format {
         case .text:
             let name = ProviderDescriptorRegistry.descriptor(for: provider).metadata.displayName
             let suffix = result.enabled ? " and enabled" : ""
-            let action = accountOptions == nil ? "stored API key" : "stored team token account"
+            let action = switch (accountOptions?.usageScope, storedAccount) {
+            case (.some, _): "stored team token account"
+            case let (nil, .some(account)): "stored API key as token account \"\(account.label)\""
+            case (nil, nil): "stored API key"
+            }
             print("Config: \(action) for \(name)\(suffix)")
         case .json:
             Self.printJSON(result, pretty: output.pretty)
@@ -249,20 +270,26 @@ extension CodexBarCLI {
         if let accountOptions {
             let existing = providerConfig.tokenAccounts
             let accounts = existing?.accounts ?? []
+            // Same fallback label and append-and-activate behavior as adding a token account in Settings.
             let account = ProviderTokenAccount(
                 id: UUID(),
-                label: accountOptions.label,
+                label: accountOptions.label ?? "Account \(accounts.count + 1)",
                 token: apiKey,
                 addedAt: Date().timeIntervalSince1970,
                 lastUsed: nil,
-                usageScope: accountOptions.usageScope.rawValue,
+                usageScope: accountOptions.usageScope?.rawValue,
                 organizationID: accountOptions.organizationID,
                 workspaceID: accountOptions.workspaceID)
             providerConfig.tokenAccounts = ProviderTokenAccountData(
                 version: existing?.version ?? 1,
                 accounts: accounts + [account],
                 activeIndex: accounts.count)
-            providerConfig.apiKey = nil
+            // z.ai team accounts replace the personal key; other providers follow their token-account policy.
+            if accountOptions.usageScope != nil
+                || TokenAccountSupportCatalog.support(for: provider)?.clearsAPIKeyOnMutation == true
+            {
+                providerConfig.apiKey = nil
+            }
             if enableProvider {
                 providerConfig.enabled = true
             }
@@ -296,15 +323,21 @@ extension CodexBarCLI {
         let cleanedWorkspaceID = try Self.cleanSingleLineConfigValue(
             workspaceID,
             fieldName: "workspace-id")
-        let hasAccountOptions = cleanedLabel != nil ||
-            cleanedScope != nil ||
-            cleanedOrganizationID != nil ||
-            cleanedWorkspaceID != nil
-        guard hasAccountOptions else { return nil }
+        let hasTeamOptions = cleanedScope != nil || cleanedOrganizationID != nil || cleanedWorkspaceID != nil
+        if Self.storesAPIKeyAsTokenAccount(provider) {
+            guard !hasTeamOptions else {
+                throw CLIArgumentError(
+                    "--usage-scope, --organization-id, and --workspace-id are only supported for --provider zai.")
+            }
+            return ConfigAPIKeyAccountOptions(label: cleanedLabel)
+        }
+        guard cleanedLabel != nil || hasTeamOptions else { return nil }
 
         // Provider-specific by design: z.ai team tokens alone accept organization, workspace, and usage-scope fields.
         guard provider == .zai else {
-            throw CLIArgumentError("Token-account options are only supported for --provider zai.")
+            throw CLIArgumentError(
+                "Token-account options are only supported for --provider zai "
+                    + "and providers that store API keys as token accounts.")
         }
 
         guard cleanedScope?.lowercased() == ZaiUsageScope.team.rawValue else {
@@ -369,10 +402,11 @@ extension CodexBarCLI {
 }
 
 struct ConfigAPIKeyAccountOptions: Equatable {
-    let label: String
-    let usageScope: ZaiUsageScope
-    let organizationID: String
-    let workspaceID: String
+    /// Nil uses the Settings fallback label, "Account N".
+    var label: String?
+    var usageScope: ZaiUsageScope?
+    var organizationID: String?
+    var workspaceID: String?
 }
 
 struct ConfigOptions: CommanderParsable {
@@ -404,7 +438,7 @@ struct ConfigSetAPIKeyOptions: CommanderParsable {
     @Flag(name: .long("no-enable"), help: "Store the key without enabling the provider")
     var noEnable: Bool = false
 
-    @Option(name: .long("label"), help: "Token-account label (z.ai team mode)")
+    @Option(name: .long("label"), help: "Token-account label (z.ai team mode, DeepSeek)")
     var label: String?
 
     @Option(name: .long("usage-scope"), help: "Token-account usage scope (z.ai: team)")
@@ -428,6 +462,8 @@ struct ConfigProviderToggleOptions: CommanderParsable {
 private struct ConfigSetAPIKeyResult: Encodable {
     let provider: String
     let enabled: Bool
+    /// Label of the token account the key was stored in; omitted for provider-level keys.
+    let tokenAccount: String?
     let configPath: String
 }
 

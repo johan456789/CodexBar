@@ -2,6 +2,10 @@
 
 ## 0.82.1 — Unreleased
 
+### Added
+
+- CLI: `config set-api-key --provider deepseek` stores the key as a new token account (named with `--label`, default `Account N`) instead of refusing, so DeepSeek API keys can be configured from the command line.
+
 ## 0.82.0 — 2026-10-26
 
 ### Highlights

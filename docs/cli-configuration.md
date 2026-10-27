@@ -101,6 +101,15 @@ printf '%s' "$Z_AI_API_KEY" | codexbar config set-api-key --provider zai --stdin
 
 Use single-line BigModel organization/project IDs; see [z.ai](zai.md).
 
+DeepSeek reads API keys only from token accounts, so `set-api-key` adds the key as a new token account and makes it
+active, the same as adding a key in Settings. Name it with `--label`; without one it is called `Account N`:
+
+```bash
+printf '%s' "$DEEPSEEK_API_KEY" | codexbar config set-api-key --provider deepseek --stdin --label work
+```
+
+Like Settings, saving the same key again adds another account.
+
 Only providers that consume config-backed API keys accept this command. Admin API providers may require a key with
 organization/usage permissions, not a normal inference key. The `xai` provider reads xAI developer-platform billing
 with a Management key plus a team ID (set `workspaceID` in the provider entry, `XAI_TEAM_ID`, or the app settings

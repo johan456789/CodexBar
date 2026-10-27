@@ -333,6 +333,8 @@ extension CodexBarCLI {
           set-api-key stores a provider API key in the resolved config file and enables that provider by default.
           For z.ai team usage, add --usage-scope team with BigModel organization and project IDs; this stores
           the key as a token account instead of a provider-level personal key.
+          Providers that read API keys only from token accounts (DeepSeek) get a new, active token account named
+          by --label (default "Account N"), the same as adding a key in Settings.
           set-cookie stores a manual Cookie header and sets the provider's cookie source to manual, like pasting
           a cookie in Settings; it enables that provider by default and rejects providers that do not read one.
           clear-credential removes the stored API key and manual cookie; pass --api-key or --cookie to clear only one.
