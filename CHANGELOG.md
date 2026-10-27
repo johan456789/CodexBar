@@ -5,6 +5,7 @@
 ### Added
 
 - CLI: `config set-api-key --provider deepseek` stores the key as a new token account (named with `--label`, default `Account N`) instead of refusing, so DeepSeek API keys can be configured from the command line.
+- CLI: remove a single token account with `config clear-credential --account <label>` or `--account-index <n>`, following the same active-account rules as Settings.
 
 ## 0.82.0 — 2026-10-26
 

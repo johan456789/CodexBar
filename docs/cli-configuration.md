@@ -150,6 +150,19 @@ Saved accounts and environment credentials are not removed.
 JSON output lists the removed fields in `cleared` (`apiKey`, `cookieHeader`); when nothing was stored, `cleared`
 is empty and the config file is not written.
 
+To remove one token account, select it with the same flags `usage` uses:
+
+```bash
+codexbar config clear-credential --provider deepseek --account work
+codexbar config clear-credential --provider deepseek --account-index 2
+```
+
+Labels match case-insensitively. Because labels need not be unique, a label shared by several accounts is refused
+with their indexes; use `--account-index` instead. Removal follows Settings: removing the active account selects the
+next one (or the previous one if it was last), and removing the last account removes the token-account list. JSON output reports `cleared: ["tokenAccount"]`
+and the removed account's label in `tokenAccount`. Antigravity accounts are removed in Settings, which also clears
+their shared OAuth cache.
+
 ## Isolated config files
 
 For tests, demos, and CI, point CodexBar at a temporary config file:
